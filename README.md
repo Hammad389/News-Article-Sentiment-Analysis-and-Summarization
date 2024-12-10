@@ -76,7 +76,7 @@ The script will generate a plot that contains:
 2. A text block containing the summary of the article.
 
 Example:
-
+(Searched for news articles about "open ai")
 ![Screenshot 2024-12-10 110044](https://github.com/user-attachments/assets/79cb41af-000a-444e-ae52-a32ba0d18f3d)
 
 ## Contributing
