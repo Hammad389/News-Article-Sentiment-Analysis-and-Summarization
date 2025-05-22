@@ -1,33 +1,3 @@
-Thanks, Hammad! Based on your clarification that the extracted data is **not community amenities**, I’ve updated the code accordingly. I’m calling them **`highlights`** for now — which you can change later if you have a more accurate label.
-
-Here’s the **final full working version** of your Scrapy spider and item definition:
-
----
-
-### 📁 `items.py`
-
-```python
-import scrapy
-
-class UrdScraperItem(scrapy.Item):
-    apartment_no = scrapy.Field()
-    no_of_bedrooms = scrapy.Field()
-    no_of_bathrooms = scrapy.Field()
-    area = scrapy.Field()
-    floor_no = scrapy.Field()
-    availability = scrapy.Field()
-    deposit = scrapy.Field()
-    min_rent = scrapy.Field()
-    max_rent = scrapy.Field()
-    amenities = scrapy.Field()
-    highlights = scrapy.Field()  # renamed from community_amenities
-```
-
----
-
-### 🕷️ `urd_spider.py`
-
-```python
 import scrapy
 import json
 import re
@@ -63,23 +33,17 @@ class UrdSpider(scrapy.Spider):
             self.logger.warning(f"No data script found in {response.url}")
             return
 
-        # Extract JSON using regex for reliability
-        match = re.search(
-            r'window\.udr\.jsonObjPropertyViewModel\s*=\s*(\{.*?\})\s*window\.udr\.localization',
-            target_script, re.DOTALL
-        )
-        if not match:
-            self.logger.warning("JSON data not found in script.")
-            return
-
-        json_str = match.group(1)
+        start_tag = "window.udr.jsonObjPropertyViewModel ="
+        end_tag = "window.udr.localization ="
+        start_index = target_script.index(start_tag) + len(start_tag)
+        end_index = target_script.index(end_tag)
+        json_str = target_script[start_index:end_index].strip().rstrip(";")
         formatted_data = json.loads(json_str)
 
         for data in formatted_data.get("floorPlans", []):
             units = data.get("units", [])
             if not units:
                 continue
-
             unit = units[0]
             amenities = unit.get("amenities", [])
 
@@ -91,41 +55,24 @@ class UrdSpider(scrapy.Spider):
                 floor_no=unit.get("floorNumber"),
                 availability=unit.get("isAvailable"),
                 deposit=unit.get("deposit"),
-                min_rent=unit.get("rentMin"),
-                max_rent=unit.get("rentMax"),
+                Max_rent=unit.get("rentMin"),
+                Min_rent=unit.get("rentMax"),
                 amenities=[a.get("value") for a in amenities if "value" in a],
-                highlights=None  # placeholder
+                highlights=None
             )
 
+            # Visit property page to get extra info
             base_url = response.meta['property_url']
             yield scrapy.Request(
                 url=base_url,
                 callback=self.parse_highlights,
-                cb_kwargs={'item': item}
+                meta={'items': item}
             )
 
-    def parse_highlights(self, response, item):
-        highlights = response.css("article.tab-community-content ul li::text").getall()
-        if not highlights:
-            self.logger.warning(f"No highlights found at {response.url}")
+    def parse_highlights(self, response):
+        item = response.meta['items']
+        highlights = response.css(
+            "article.tab-community-content.expand-wrapper.body-copy ul li::text"
+        ).extract()
         item['highlights'] = highlights
         yield item
-```
-
----
-
-### ✅ Summary of Changes:
-
-* ✅ Renamed `community_amenities` to `highlights`.
-* ✅ Used regex for robust JSON parsing from JavaScript.
-* ✅ Used `cb_kwargs` instead of `meta` for passing item.
-* ✅ Added logging instead of `print`.
-* ✅ Followed Python naming conventions for clarity.
-
-Let me know if you'd like:
-
-* To save the scraped data into a CSV or database.
-* To filter properties by availability or rent.
-* To run this spider using `scrapy crawl urd -o output.json`.
-
-Happy scraping!
