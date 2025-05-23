@@ -1,9 +1,53 @@
-for tags in response.css("div.property-card"):  # not the parent wrapper
-    community_link = response.urljoin(tags.css("div.address-section a.prop-link::attr(href)").get())
-    community_name = tags.css("div.address-section a.prop-link span.prop-name::text").get()
+# Define your item pipelines here
+#
+# Don't forget to add your pipeline to the ITEM_PIPELINES setting
+# See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
+import json
+import pandas as pd
 
-    # Relative XPath scoped to just this tag
-    address_parts = tags.xpath(".//span[@class='address']//text()").getall()
-    community_address = ' '.join(part.strip() for part in address_parts if part.strip())
+# useful for handling different item types with a single interface
+from itemadapter import ItemAdapter
 
-    print("✅ Address:", community_address)
+
+class UrdScraperPipeline_csv:
+    def open_spider(self,spider):
+        self.items = []
+
+    def process_item(self, item, spider):
+        self.items.append(dict(item))
+        return item
+
+    def close_spider(self, spider):
+        df = pd.DataFrame(self.items)
+        df.to_csv('data.csv', index=False)
+
+
+class UrdScraperPipeline_json:
+    def open_spider(self,spider):
+        self.items = []
+
+
+    def process_item(self, item, spider):
+        self.items.append(dict(item))
+        return item
+
+    def close_spider(self, spider):
+        with open ("data.json", "w") as file:
+            json.dump(self.items, file)
+
+
+class UrdScraperPipeline_parquet:
+    def open_spider(self,spider):
+        self.items = []
+
+
+    def process_item(self, item, spider):
+        self.items.append(dict(item))
+        return item
+
+    def close_spider(self, spider):
+        with open ("data.json", "w") as file:
+            json.dump(self.items, file)
+
+        df = pd.DataFrame(self.items)
+        df.to_parquet('data.parquet', index=False)
