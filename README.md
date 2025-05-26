@@ -1,60 +1,90 @@
-To save your Scrapy `urd` data to a **MySQL database using SQLAlchemy**, you'll need to:
+Great! If you want to:
 
-1. **Fix and structure your SQLAlchemy table correctly.**
-2. **Define a pipeline in `pipelines.py` to insert each item.**
-3. **Enable the pipeline in your `settings.py`.**
+* **Save data into a single table in one database**, and
+* **Save data into multiple tables in a different database**,
+
+…**in the same Scrapy project**, here's how you can do it cleanly using **SQLAlchemy** and **a custom pipeline design**.
 
 ---
 
-### ✅ Step 1: Correct SQLAlchemy Table Setup (Use This in a Separate File e.g., `db_model.py`)
+## ✅ Approach Overview
+
+You can build **a single pipeline** that:
+
+* Initializes two SQLAlchemy engines:
+
+  * `engine_main` → Single table (e.g., `Udr`) in Database A
+  * `engine_logs` → Multiple tables (e.g., `Udr`, `AuditLog`, etc.) in Database B
+* During `process_item`, insert the item into both databases — with separate logic for each.
+
+---
+
+## ✅ Example Setup
+
+### `models.py`
+
+Assume both databases use the same models:
 
 ```python
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, MetaData, Table
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime
 
 Base = declarative_base()
 
-class UDRData(Base):
-    __tablename__ = "udr_data"
+class Udr(Base):
+    __tablename__ = 'udr'
+    id = Column(Integer, primary_key=True)
+    community_name = Column(String(255))
+    community_address = Column(String(255))
+    community_rent = Column(String(50))
+    community_rooms = Column(String(50))
+    apartment_no = Column(String(50))
+    no_of_bedrooms = Column(String(50))
+    no_of_bathrooms = Column(String(50))
+    area = Column(String(50))
+    floor_no = Column(String(50))
+    availability = Column(String(50))
+    deposit = Column(String(50))
+    Max_rent = Column(String(50))
+    Min_rent = Column(String(50))
+    amenities = Column(Text)
+    community_amenities = Column(Text)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    community_name = Column(String, nullable=False)
-    community_address = Column(String, nullable=False)
-    community_rent = Column(Float, nullable=True)
-    community_rooms = Column(Integer, nullable=True)
-    apartment_no = Column(String, nullable=True)
-    no_of_bedrooms = Column(Integer, nullable=True)
-    no_of_bathrooms = Column(Integer, nullable=True)
-    area = Column(Integer, nullable=True)
-    floor_no = Column(Integer, nullable=True)
-    availability = Column(Boolean, nullable=True)
-    deposit = Column(Float, nullable=True)
-    Max_rent = Column(Float, nullable=True)
-    Min_rent = Column(Float, nullable=True)
-    amenities = Column(String, nullable=True)
-    community_amenities = Column(String, nullable=True)
+class AuditLog(Base):
+    __tablename__ = 'audit_log'
+    id = Column(Integer, primary_key=True)
+    action = Column(String(255))
+    user = Column(String(100))
+    timestamp = Column(DateTime)
+    status = Column(String(100))
 ```
 
 ---
 
-### ✅ Step 2: Pipeline to Save Scrapy Item
-
-Create or edit `pipelines.py`:
+### `pipelines.py`
 
 ```python
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
-from yourproject.db_model import UDRData, Base  # Replace 'yourproject' with your actual project folder
+from sqlalchemy.orm import sessionmaker
+from urd_scraper.models import Base, Udr, AuditLog
+from datetime import datetime
 
-class MySQLAlchemyPipeline:
+class MultiDBPipeline:
     def open_spider(self, spider):
-        engine = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module_5')
-        Base.metadata.create_all(engine)
-        self.Session = sessionmaker(bind=engine)
+        # Engine A: Single-table DB (only Udr)
+        self.engine_main = create_engine("mysql+mysqlconnector://root:root@localhost:3306/single_table_db")
+        Base.metadata.create_all(self.engine_main)
+        self.SessionMain = sessionmaker(bind=self.engine_main)
+
+        # Engine B: Multi-table DB (Udr + AuditLog)
+        self.engine_logs = create_engine("mysql+mysqlconnector://root:root@localhost:3306/multi_table_db")
+        Base.metadata.create_all(self.engine_logs)
+        self.SessionLogs = sessionmaker(bind=self.engine_logs)
 
     def process_item(self, item, spider):
-        session = self.Session()
-        record = UDRData(
+        # Save to single-table DB
+        session_main = self.SessionMain()
+        main_record = Udr(
             community_name=item.get('community_name'),
             community_address=item.get('community_address'),
             community_rent=item.get('community_rent'),
@@ -71,36 +101,60 @@ class MySQLAlchemyPipeline:
             amenities=', '.join(item.get('amenities', [])),
             community_amenities=', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else ''
         )
-        session.add(record)
-        session.commit()
-        session.close()
+        session_main.add(main_record)
+        session_main.commit()
+        session_main.close()
+
+        # Save to multi-table DB
+        session_logs = self.SessionLogs()
+
+        # Save Udr data
+        log_udr = Udr(**main_record.__dict__)
+        del log_udr.__dict__['_sa_instance_state']  # Prevent SQLAlchemy warning
+        session_logs.add(log_udr)
+
+        # Log entry (optional)
+        log = AuditLog(
+            action='Insert UDR record',
+            user='scrapy_bot',
+            timestamp=datetime.now(),
+            status='Success'
+        )
+        session_logs.add(log)
+
+        session_logs.commit()
+        session_logs.close()
+
         return item
 ```
 
 ---
 
-### ✅ Step 3: Enable the Pipeline in `settings.py`
-
-Add this:
+### `settings.py`
 
 ```python
 ITEM_PIPELINES = {
-    'yourproject.pipelines.MySQLAlchemyPipeline': 300,
+    'urd_scraper.pipelines.MultiDBPipeline': 300,
 }
 ```
 
-Replace `yourproject` with your actual Scrapy project name.
+---
+
+## ✅ Summary
+
+| Database          | Table(s)           | Action                  |
+| ----------------- | ------------------ | ----------------------- |
+| `single_table_db` | `udr`              | Save only UDR data      |
+| `multi_table_db`  | `udr`, `audit_log` | Save UDR and log record |
 
 ---
 
-### Optional Tips:
+## Want more?
 
-* Make sure your MySQL server is running.
-* Ensure that your `module_5` database exists before running.
-* Install dependencies if missing:
+Would you like to:
 
-```bash
-pip install sqlalchemy mysql-connector-python
-```
+* Add a switch to enable/disable either DB?
+* Save CSV or Parquet alongside DB?
+* Encrypt or anonymize sensitive fields (e.g., address)?
 
-Let me know if you want to also save into **CSV or Parquet** along with SQL — I can help set up multiple pipelines.
+Let me know — I can help you extend this flexibly.
