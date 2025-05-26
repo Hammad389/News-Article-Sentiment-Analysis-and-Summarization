@@ -3,11 +3,10 @@ from email.contentmanager import raw_data_manager
 import scrapy
 import json
 import re
-# from urd_scraper.items import UrdScraperItem
 
 
 class UrdSpider(scrapy.Spider):
-    name = "urd"
+    name = "udr"
     allowed_domains = ["udr.com"]
     start_urls = ["https://www.udr.com/"]
 
@@ -26,8 +25,9 @@ class UrdSpider(scrapy.Spider):
             community_data_dict = {'community_link':response.urljoin(tags.css("div.address-section a.prop-link::attr(href)").get()),
                                    'community_name':tags.css("div.address-section a.prop-link span.prop-name::text").get(),
                                    'community_address':('').join(s.strip() for s in raw_community_address),
-                                   'community_rent':[community_rent.strip("Starting at ") if "Starting at " in community_rent else community_rent][0],
-                                   'community_rooms':tags.css("div [class='card-property-info'] ul li span[class='bed-max']::text").get(),
+                                   # added adjustments to have a clean value
+                                   'community_rent':[community_rent.strip("Starting at $") if "Starting at $" in community_rent else community_rent][0],
+                                   'community_rooms':tags.css("div [class='card-property-info'] ul li span[class='bed-max']::text").get().strip("Bedrooms").strip(),
                                    'community_description':tags.css("div [class='card-property-info'] p::text").get().strip()
                                    }
             yield scrapy.Request(
@@ -64,18 +64,18 @@ class UrdSpider(scrapy.Spider):
             item = {
                 "community_name" : meta_data["community_name"],
                 "community_address" : meta_data["community_address"],
-                "community_rent" : meta_data["community_rent"],
-                "community_rooms": meta_data["community_rooms"],
+                "community_rent" : int(meta_data["community_rent"].strip("$").replace(',','')),
+                "community_rooms": int(meta_data["community_rooms"]),
                 "community_description": meta_data["community_description"],
-                "apartment_no" : unit.get("marketingName"),
-                "no_of_bedrooms" : unit.get("bedrooms"),
-                "no_of_bathrooms" : unit.get("bathrooms"),
-                "area" : unit.get("sqFt"),
-                "floor_no" : unit.get("floorNumber"),
+                "apartment_no" : unit.get("marketingName").strip(),
+                "no_of_bedrooms" : int(unit.get("bedrooms")),
+                "no_of_bathrooms" : int(unit.get("bathrooms")),
+                "area" : int(unit.get("sqFt")),
+                "floor_no" : int(unit.get("floorNumber")),
                 "availability" : unit.get("isAvailable"),
-                "deposit" : unit.get("deposit"),
-                "Max_rent" : unit.get("rentMax"),
-                "Min_rent" : unit.get("rentMin"),
+                "deposit" : float(unit.get("deposit")),
+                "Max_rent" : float(unit.get("rentMax")),
+                "Min_rent" : float(unit.get("rentMin")),
                 "amenities" : [a.get("value") for a in amenities if "value" in a],
                 "community_amenities" : None
             }
