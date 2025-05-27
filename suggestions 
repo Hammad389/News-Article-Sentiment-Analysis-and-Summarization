@@ -161,3 +161,147 @@ Post-Scrape Script	Cleanup, after-run processing	Yes	Good for batching data
 
 Would you like me to generate a complete folder layout and implementation for all three methods with configuration?
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Here's how you can refactor the post-scraping data storage into a separate class in your Scrapy pipeline, using open_spider and close_spider hooks to handle MySQL insertion after scraping completes.
+
+
+---
+
+1. Folder Structure
+
+udr_scraper/
+├── spiders/
+│   └── udr_spider.py
+├── pipelines.py
+├── models.py           # SQLAlchemy models
+├── settings.py
+├── output/
+│   └── data.json       # Scraped file (saved during scraping)
+
+
+---
+
+2. Pipeline Class (Post-scraping Insertion)
+
+# pipelines.py
+
+import json
+from sqlalchemy.orm import sessionmaker
+from models import Base, Udr
+from sqlalchemy import create_engine
+
+class PostScrapeMySQLPipeline:
+    def __init__(self):
+        self.file_path = "output/data.json"  # adjust as needed
+
+    def open_spider(self, spider):
+        # Set up the DB connection
+        self.engine = create_engine("mysql+mysqlconnector://root:root@localhost:3306/module_5_single")
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+    def close_spider(self, spider):
+        # Read data from file and insert to DB
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            spider.logger.error(f"Failed to read JSON file: {e}")
+            return
+
+        session = self.Session()
+        for item in data:
+            try:
+                record = Udr(**item)
+                session.add(record)
+            except Exception as e:
+                spider.logger.error(f"Failed to insert item: {item}\nError: {e}")
+        session.commit()
+        session.close()
+
+
+---
+
+3. Item Pipeline for File Saving (Optional JSON Exporter)
+
+If you're exporting manually in your spider, skip this. If not, you can use Scrapy's FeedExporter:
+
+# settings.py
+FEEDS = {
+    "output/data.json": {
+        "format": "json",
+        "overwrite": True,
+        "encoding": "utf8",
+    }
+}
+
+
+---
+
+4. Add to settings.py
+
+ITEM_PIPELINES = {
+    'udr_scraper.pipelines.PostScrapeMySQLPipeline': 300,
+}
+
+
+---
+
+5. SQLAlchemy Model (Single Table)
+
+# models.py
+
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, Float, Boolean, Text
+
+Base = declarative_base()
+
+class Udr(Base):
+    __tablename__ = "udr_data"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    community_name = Column(String(100), nullable=False)
+    community_address = Column(String(200), nullable=False)
+    community_rent = Column(Float, nullable=True)
+    community_rooms = Column(Integer, nullable=True)
+    community_description = Column(Text, nullable=True)
+    apartment_no = Column(String(50), nullable=True)
+    no_of_bedrooms = Column(Integer, nullable=True)
+    no_of_bathrooms = Column(Integer, nullable=True)
+    area = Column(Integer, nullable=True)
+    floor_no = Column(Integer, nullable=True)
+    availability = Column(Boolean, nullable=True)
+    deposit = Column(Float, nullable=True)
+    Max_rent = Column(Float, nullable=True)
+    Min_rent = Column(Float, nullable=True)
+    amenities = Column(Text, nullable=True)
+    community_amenities = Column(Text, nullable=True)
+
+
+---
+
+6. Behavior
+
+During Scraping: Data is saved to data.json file via Scrapy Feed Exporter.
+
+After Scraping Ends (close_spider): Data is loaded and inserted into MySQL via SQLAlchemy.
+
+
+
+---
+
+Would you like me to now create the version using two or three normalized tables in a similar close_spider class structure?
+
+
