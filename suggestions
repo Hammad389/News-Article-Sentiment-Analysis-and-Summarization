@@ -1,0 +1,351 @@
+# Define your item pipelines here
+#
+# Don't forget to add your pipeline to the ITEM_PIPELINES setting
+# See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
+import csv
+import json
+from xmlrpc.client import Boolean
+
+import pandas as pd
+from sqlalchemy import create_engine
+from urd_scraper.models import Udr, Base_multiple_table, Base_single_table, ApartmentData, CommunityData
+from sqlalchemy.orm import sessionmaker, Session
+from itemadapter import ItemAdapter
+
+# useful for handling different item types with a single interface
+from itemadapter import ItemAdapter
+
+
+class UrdScraperPipelineCsv:
+    def open_spider(self,spider):
+        self.file = open('data.csv', 'w', encoding='utf-8')
+        self.writer = None
+
+    def process_item(self, item, spider):
+        item = dict(item)
+        if self.writer is None:
+            self.writer = csv.DictWriter(self.file, fieldnames=item.keys())
+            self.writer.writeheader()
+        self.writer.writerow(item)
+        return item
+
+    def close_spider(self, spider):
+        self.file.close()
+
+
+class UrdScraperPipelineJson:
+    def open_spider(self,spider):
+        self.file = open('data.json', 'w', encoding='utf-8')
+        self.file.write('[\n')
+        self.first = True
+
+    def process_item(self, item, spider):
+        if not self.first:
+            self.file.write(',\n')
+        self.first = False
+        line = json.dumps(dict(item), ensure_ascii=False)
+        self.file.write(line)
+        return item
+
+    def close_spider(self, spider):
+        self.file.write('\n]')
+        self.file.close()
+
+class UrdScraperPipelineParquet:
+    def open_spider(self, spider):
+        self.items = []
+
+    def process_item(self, item, spider):
+        self.items.append(dict(item))
+        if len (self.items) >= 100:
+            self.save_to_parquet()
+        return item
+
+    def save_to_parquet(self):
+        df = pd.DataFrame(self.items)
+        df.to_parquet('data.parquet', index=False)
+        self.items.clear()
+
+    def close_spider(self, spider):
+        if self.items:
+            self.save_to_parquet()
+
+
+class SingleTableDatabase:
+    # engine = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module_5')
+    # def open_spider(self, spider):
+        # Base.metadata.create_all(self.engine)
+        # self.Session = sessionmaker(bind=self.engine)
+
+    def open_spider(self, spider):
+        # single column implementation
+        engine_single = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module5_single')
+        Base_single_table.metadata.create_all(engine_single)
+        self.Session_single = sessionmaker(bind=engine_single)
+
+        # multiple column implementation
+        engine_multiple = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module_5_multiple')
+        Base_multiple_table.metadata.create_all(engine_multiple)
+        self.Session_multiple = sessionmaker(bind=engine_multiple)
+
+
+
+    def process_item(self, item, spider):
+        session_single = self.Session_single()
+        single_record = Udr(
+            community_name=item.get('community_name'),
+            community_address=item.get('community_address'),
+            community_rent=item.get('community_rent'),
+            community_rooms=item.get('community_rooms'),
+            community_description=item.get('community_description'),
+            apartment_no=item.get('apartment_no'),
+            no_of_bedrooms=item.get('no_of_bedrooms'),
+            no_of_bathrooms=item.get('no_of_bathrooms'),
+            area=item.get('area'),
+            floor_no=item.get('floor_no'),
+            availability=item.get('availability'),
+            deposit=item.get('deposit'),
+            Max_rent=item.get('Max_rent'),
+            Min_rent=item.get('Min_rent'),
+            amenities=', '.join(item.get('amenities', [])),
+            community_amenities=', '.join(item.get('community_amenities', [])) if item.get(
+                'community_amenities') else '',
+
+            # move_in_date = item.get('move_in_date'),
+            # lease_term = item.get('lease_term'),
+            # rent = item.get('rent'),
+            # corporate_rent = item.get('corporate_rent'),
+            # furnished_rent = item.get('furnished_rent'),
+        )
+        session_single.add(single_record)
+        session_single.commit()
+        session_single.close()
+        # return item
+
+        session_mutiple = self.Session_multiple()
+        multiple_record_community = CommunityData(
+            community_name=item.get('community_name'),
+            community_address=item.get('community_address'),
+            community_rent=item.get('community_rent'),
+            community_rooms=item.get('community_rooms'),
+            community_description=item.get('community_description'),
+            community_amenities = ', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else ''
+        )
+
+        multiple_record_apartment = ApartmentData(
+            community=item.get('community_name'),
+            apartment_no=item.get('apartment_no'),
+            no_of_bedrooms=item.get('no_of_bedrooms'),
+            no_of_bathrooms=item.get('no_of_bathrooms'),
+            area=item.get('area'),
+            floor_no=item.get('floor_no'),
+            availability=item.get('availability'),
+            deposit=item.get('deposit'),
+            Max_rent=item.get('Max_rent'),
+            Min_rent=item.get('Min_rent'),
+            amenities=', '.join(item.get('amenities', [])),
+            community_amenities=', '.join(item.get('community_amenities', [])) if item.get(
+                'community_amenities') else ''
+        )
+
+        # rent_matrix_record = RentMatrixData(
+        #     apartment_no = item.get('apartment_no'),
+        #     move_in_date = item.get('move_in_date'),
+        #     lease_term = item.get('lease_term'),
+        #     rent = item.get('rent'),
+        #     corporate_rent = item.get('corporate_rent'),
+        #     furnished_rent = item.get('furnished_rent')
+        #
+        # )
+        session_mutiple.add(multiple_record_community)
+        session_mutiple.add(multiple_record_apartment)
+        # session_mutiple.add(rent_matrix_record)
+        session_mutiple.commit()
+        session_mutiple.close()
+        return item
+
+    # def close_spider(self, spider):
+    #     self.engine.dispose()
+
+
+
+
+from sqlalchemy import Column, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import (Integer, String, Float, Boolean, Text, DateTime)
+from datetime import datetime
+from sqlalchemy.orm import relationship
+from scrapy.utils.project import get_project_settings
+
+Base_single_table = declarative_base()
+Base_multiple_table = declarative_base()
+
+
+
+class Udr(Base_single_table):
+    __tablename__="udr_data"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    community_name = Column(String(100), nullable=False)
+    community_address = Column(String(200), nullable=False)
+    community_rent = Column(Float, nullable=True)
+    community_rooms = Column(Integer, nullable=True)
+    community_description = Column(Text, nullable=True)
+    apartment_no = Column(String(50), nullable=True)
+    no_of_bedrooms = Column(Integer, nullable=True)
+    no_of_bathrooms = Column(Integer, nullable=True)
+    area = Column(Integer, nullable=True)
+    floor_no = Column(Integer, nullable=True)
+    availability = Column(Boolean, nullable=True)
+    deposit = Column(Float, nullable=True)
+    Max_rent = Column(Float, nullable=True)
+    Min_rent = Column(Float, nullable=True)
+    amenities = Column(Text, nullable=True)
+    community_amenities = Column(Text, nullable=True)
+
+    # move_in_date = Column(Text, nullable=False)
+    # lease_term = Column(Integer, nullable=True)
+    # rent = Column(Integer, nullable=True)
+    # corporate_rent = Column(Integer, nullable=True)
+    # furnished_rent = Column(Integer, nullable=True)
+
+    # updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
+    # created_datetime = Column(DateTime(), default=datetime.now)
+
+# Multiple Tables implementation
+# One-to-Many Relationship
+class CommunityData(Base_multiple_table):
+    __tablename__ = "community_data"
+
+    id = Column(Integer, autoincrement=True)
+    community_name = Column(String(100), primary_key=True, nullable=False)
+    community_address = Column(String(200), nullable=False)
+    community_rent = Column(Float, nullable=True)
+    community_rooms = Column(Integer, nullable=True)
+    community_description = Column(Text, nullable=True)
+    apartment_data = relationship("ApartmentData")
+    community_amenities = Column(Text, nullable=True)
+    # updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
+    # created_datetime = Column(DateTime(), default=datetime.now)
+
+class ApartmentData(Base_multiple_table):
+    __tablename__ = "apartment_data"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    community = Column(String(100), ForeignKey('community_data.community_name'))
+    # CommunityData = relationship(CommunityData)
+    apartment_no = Column(String(50), nullable=True)
+    no_of_bedrooms = Column(Integer, nullable=True)
+    no_of_bathrooms = Column(Integer, nullable=True)
+    area = Column(Integer, nullable=True)
+    floor_no = Column(Integer, nullable=True)
+    availability = Column(Boolean, nullable=True)
+    deposit = Column(Float, nullable=True)
+    Max_rent = Column(Float, nullable=True)
+    Min_rent = Column(Float, nullable=True)
+    amenities = Column(Text, nullable=True)
+    move_in_date = Column(Text, nullable=False)
+    lease_term = Column(Integer, nullable=True)
+    rent = Column(Integer, nullable=True)
+    corporate_rent = Column(Integer, nullable=True)
+    furnished_rent = Column(Integer, nullable=True)
+    # rent_matrix_data = relationship("RentMatrixData", backref='ApartmentData')
+    # updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
+    # created_datetime = Column(DateTime(), default=datetime.now)
+
+    # community_amenities = Column(Text, nullable=True) # community amenities should be in community table
+#
+# class RentMatrixData(Base_multiple_table):
+#     __tablename__ = "rent_matrix"
+#
+#     id = Column(Integer, primary_key=True , autoincrement=True)
+#     apartment_no = Column(String(100), ForeignKey('apartment_data.apartment_no'))
+#     lease_term = Column(Integer, nullable=False)
+#     rent = Column(Integer, nullable=False)
+#     corporate_rent = Column(Integer, nullable=True)
+#     furnished_rent = Column(Integer, nullable=True)
+#     updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
+#     created_datetime = Column(DateTime(), default=datetime.now)
+
+
+
+    raise get_mysql_exception(
+mysql.connector.errors.DatabaseError: 1265 (01000): Data truncated for column 'community_rent' at row 1
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\scrapy\core\scraper.py", line 381, in start_itemproc
+    output = await maybe_deferred_to_future(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\twisted\internet\defer.py", line 1088, in _runCallbacks
+    current.result = callback(  # type: ignore[misc]
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\scrapy\utils\defer.py", line 407, in f
+    return deferred_from_coro(coro_f(*coro_args, **coro_kwargs))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\urd_scraper\pipelines.py", line 121, in process_item
+    session_single.commit()
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
+    self.session.flush()
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
+    self._flush(objects)
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
+    flush_context.execute()
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 1233, in _emit_insert_statements
+    result = connection.execute(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
+    return meth(
+           ^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\mysql\connector\cursor_cext.py", line 356, in execute
+    self._connection.cmd_query(
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\mysql\connector\opentelemetry\context_propagation.py", line 97, in wrapper
+    return method(cnx, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Hammadhussain\PycharmProjects\Module5\.venv\Lib\site-packages\mysql\connector\connection_cext.py", line 781, in cmd_query
+    raise get_mysql_exception(
+sqlalchemy.exc.DatabaseError: (mysql.connector.errors.DatabaseError) 1265 (01000): Data truncated for column 'community_rent' at row 1
+[SQL: INSERT INTO udr_data (community_name, community_address, community_rent, community_rooms, community_description, apartment_no, no_of_bedrooms, no_of_bathrooms, area, floor_no, availability, deposit, `Max_rent`, `Min_rent`, amenities, community_amenities) VALUES (%(community_name)s, %(community_address)s, %(community_rent)s, %(community_rooms)s, %(community_description)s, %(apartment_no)s, %(no_of_bedrooms)s, %(no_of_bathrooms)s, %(area)s, %(floor_no)s, %(availability)s, %(deposit)s, %(Max_rent)s, %(Min_rent)s, %(amenities)s, %(community_amenities)s)]
+[parameters: {'community_name': 'Bay Terrace', 'community_address': '3204 Casa De Campo WaySan Mateo, CA 94403', 'community_rent': '2,800', 'community_rooms': '3', 'community_description': 'Located in the established community of East San Mateo, our stylish apartments offer residents a convenient place to call home.', 'apartment_no': '32493', 'no_of_bedrooms': 2, 'no_of_bathrooms': 1.0, 'area': 750, 'floor_no': 1, 'availability': 1, 'deposit': 675.0, 'Max_rent': 2800.0, 'Min_rent': 2800.0, 'amenities': 'White on white finish package, Black appliances, White cabinets, White countertops, Wood plank flooring', 'community_amenities': ''}]
+(Background on this error at: https://sqlalche.me/e/20/4xp6)
