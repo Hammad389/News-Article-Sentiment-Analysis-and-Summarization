@@ -1,98 +1,135 @@
-# Scrapy settings for urd_scraper project
-#
-# For simplicity, this file contains only settings considered important or
-# commonly used. You can find more settings consulting the documentation:
-#
-#     https://docs.scrapy.org/en/latest/topics/settings.html
-#     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
+from sqlalchemy import Column, ForeignKey, PrimaryKeyConstraint
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import (Integer, String, Float, Boolean, Text, DateTime, Date)
+from datetime import datetime
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from scrapy.utils.project import get_project_settings
 
-BOT_NAME = "urd_scraper"
+Base_single_table = declarative_base()
+Base_multiple_table = declarative_base()
+Base_post_scraping_table = declarative_base()
 
-SPIDER_MODULES = ["urd_scraper.spiders"]
-NEWSPIDER_MODULE = "urd_scraper.spiders"
 
-# CONNECTION_STRING = 'mysql+mysqlconnector://root:root@localhost:3306/module_5'
+class Udr(Base_single_table):
+    __tablename__="udr_data"
 
-# Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = "urd_scraper (+http://www.yourdomain.com)"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    community_name = Column(String(100), nullable=False)
+    community_address = Column(String(200), nullable=False)
+    community_rent = Column(Float, nullable=True)
+    community_rooms = Column(Integer, nullable=True)
+    community_description = Column(Text, nullable=True)
+    apartment_no = Column(String(50), nullable=True)
+    no_of_bedrooms = Column(Integer, nullable=True)
+    no_of_bathrooms = Column(Integer, nullable=True)
+    area = Column(Integer, nullable=True)
+    floor_no = Column(Integer, nullable=True)
+    availability = Column(Boolean, nullable=True)
+    deposit = Column(Float, nullable=True)
+    Max_rent = Column(Float, nullable=True)
+    Min_rent = Column(Float, nullable=True)
+    amenities = Column(Text, nullable=True)
+    community_amenities = Column(Text, nullable=True)
 
-# Obey robots.txt rules
-ROBOTSTXT_OBEY = True
+    move_in_date = Column(Date, nullable=True)
+    lease_term = Column(Integer, nullable=True)
+    rent = Column(Integer, nullable=True)
+    corporate_rent = Column(Integer, nullable=True)
+    furnished_rent = Column(Integer, nullable=True)
 
-# Configure maximum concurrent requests performed by Scrapy (default: 16)
-#CONCURRENT_REQUESTS = 32
+    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=func.now())
+    created_datetime = Column(DateTime(), default=datetime.now)
 
-# Configure a delay for requests for the same website (default: 0)
-# See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
-# See also autothrottle settings and docs
-#DOWNLOAD_DELAY = 3
-# The download delay setting will honor only one of:
-#CONCURRENT_REQUESTS_PER_DOMAIN = 16
-#CONCURRENT_REQUESTS_PER_IP = 16
 
-# Disable cookies (enabled by default)
-#COOKIES_ENABLED = False
+# Multiple Tables implementation
+# One-to-Many Relationship
 
-# Disable Telnet Console (enabled by default)
-#TELNETCONSOLE_ENABLED = False
+# Now as we have implemented insert ignore on community data we use it as a foreign key in apartment data
+class CommunityData(Base_multiple_table):
+    __tablename__ = "community_data"
 
-# Override the default request headers:
-#DEFAULT_REQUEST_HEADERS = {
-#    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-#    "Accept-Language": "en",
-#}
+    community_sr = Column(Integer,primary_key=True, autoincrement=True)
+    community_name = Column(String(100), unique=True, nullable=False)
+    community_address = Column(String(200), nullable=False)
+    community_rent = Column(Float, nullable=True)
+    community_rooms = Column(Integer, nullable=True)
+    community_description = Column(Text, nullable=True)
+    child = relationship("ApartmentData", back_populates="parent")
+    # apartment_data = relationship("ApartmentData")  # To create foreign in Apartement data
+    community_amenities = Column(Text, nullable=True)
+    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=func.now())
+    created_datetime = Column(DateTime(), default=datetime.now)
 
-# Enable or disable spider middlewares
-# See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-#SPIDER_MIDDLEWARES = {
-#    "urd_scraper.middlewares.UrdScraperSpiderMiddleware": 543,
-#}
 
-# Enable or disable downloader middlewares
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#DOWNLOADER_MIDDLEWARES = {
-#    "urd_scraper.middlewares.UrdScraperDownloaderMiddleware": 543,
-#}
 
-# Enable or disable extensions
-# See https://docs.scrapy.org/en/latest/topics/extensions.html
-#EXTENSIONS = {
-#    "scrapy.extensions.telnet.TelnetConsole": None,
-#}
+class ApartmentData(Base_multiple_table):
+    __tablename__ = "apartment_data"
 
-# Configure item pipelines
-# See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-ITEM_PIPELINES = {
-   "urd_scraper.pipelines.UrdScraperPipelineCsv": 300,
-   "urd_scraper.pipelines.UrdScraperPipelineJson": 301,
-   "urd_scraper.pipelines.UrdScraperPipelineParquet": 302,
-   "urd_scraper.pipelines.SingleTableDatabase": 303
-   # "urd_scraper.pipelines.MultipleTableDatabase": 304
-}
+    apartment_sr = Column(Integer, primary_key=True ,autoincrement=True)   #--------- changing it a little bit
+    community = Column(String(100), ForeignKey('community_data.community_name'))
+    parent = relationship("CommunityData", back_populates="child")
+    apartment_no = Column(String(50),unique=True, nullable=True) # Fix----------
+    no_of_bedrooms = Column(Integer, nullable=True)
+    no_of_bathrooms = Column(Integer, nullable=True)
+    area = Column(Integer, nullable=True)
+    floor_no = Column(Integer, nullable=True)
+    availability = Column(Boolean, nullable=True)
+    deposit = Column(Float, nullable=True)
+    Max_rent = Column(Float, nullable=True)
+    Min_rent = Column(Float, nullable=True)
+    amenities = Column(Text, nullable=True)
 
-# Enable and configure the AutoThrottle extension (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/autothrottle.html
-#AUTOTHROTTLE_ENABLED = True
-# The initial download delay
-#AUTOTHROTTLE_START_DELAY = 5
-# The maximum download delay to be set in case of high latencies
-#AUTOTHROTTLE_MAX_DELAY = 60
-# The average number of requests Scrapy should be sending in parallel to
-# each remote server
-#AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
-# Enable showing throttling stats for every response received:
-#AUTOTHROTTLE_DEBUG = False
+    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=func.now())
+    created_datetime = Column(DateTime(), default=datetime.now)
 
-# Enable and configure HTTP caching (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-#HTTPCACHE_ENABLED = True
-#HTTPCACHE_EXPIRATION_SECS = 0
-#HTTPCACHE_DIR = "httpcache"
-#HTTPCACHE_IGNORE_HTTP_CODES = []
-#HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
 
-# Set settings whose default value is deprecated to a future-proof value
-REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
-TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
-FEED_EXPORT_ENCODING = "utf-8"
+
+class RentMatrixData(Base_multiple_table):
+    __tablename__ = "rent_matrix"
+
+    id = Column(Integer, primary_key=True , autoincrement=True)
+    apartement = Column(String(50), ForeignKey('apartment_data.apartment_no'))
+    move_in_date = Column(Date, nullable=True)
+    lease_term = Column(Integer, nullable=True)
+    rent = Column(Integer, nullable=True)
+    corporate_rent = Column(Integer, nullable=True)
+    furnished_rent = Column(Integer, nullable=True)
+    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=func.now())
+    created_datetime = Column(DateTime(), default=datetime.now)
+
+
+
+
+class PostScraping(Base_post_scraping_table):
+    __tablename__="post_scraping_data"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    community_name = Column(String(100), nullable=False)
+    community_address = Column(String(200), nullable=False)
+    community_rent = Column(Float, nullable=True)
+    community_rooms = Column(Integer, nullable=True)
+    community_description = Column(Text, nullable=True)
+    apartment_no = Column(String(50), nullable=True)
+    no_of_bedrooms = Column(Integer, nullable=True)
+    no_of_bathrooms = Column(Integer, nullable=True)
+    area = Column(Integer, nullable=True)
+    floor_no = Column(Integer, nullable=True)
+    availability = Column(Boolean, nullable=True)
+    deposit = Column(Float, nullable=True)
+    Max_rent = Column(Float, nullable=True)
+    Min_rent = Column(Float, nullable=True)
+    amenities = Column(Text, nullable=True)
+    community_amenities = Column(Text, nullable=True)
+
+    move_in_date = Column(Date, nullable=True)
+    lease_term = Column(Integer, nullable=True)
+    rent = Column(Integer, nullable=True)
+    corporate_rent = Column(Integer, nullable=True)
+    furnished_rent = Column(Integer, nullable=True)
+
+    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
+    created_datetime = Column(DateTime(), default=datetime.now)
+
+
+
