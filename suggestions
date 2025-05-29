@@ -1,100 +1,20 @@
-def process_item(self, item, spider):
-    # ----- SINGLE TABLE INSERT -----
-    session_single = self.Session_single()
-    try:
-        single_record = Udr(
-            community_name=item.get('community_name'),
-            community_address=item.get('community_address'),
-            community_rent=item.get('community_rent'),
-            community_rooms=item.get('community_rooms'),
-            community_description=item.get('community_description'),
-            apartment_no=item.get('apartment_no'),
-            no_of_bedrooms=item.get('no_of_bedrooms'),
-            no_of_bathrooms=item.get('no_of_bathrooms'),
-            area=item.get('area'),
-            floor_no=item.get('floor_no'),
-            availability=item.get('availability'),
-            deposit=item.get('deposit'),
-            Max_rent=item.get('Max_rent'),
-            Min_rent=item.get('Min_rent'),
-            amenities=', '.join(item.get('amenities', [])),
-            community_amenities=', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else '',
-            move_in_date=item.get('move_in_date'),
-            lease_term=item.get('lease_term'),
-            rent=item.get('rent'),
-            corporate_rent=item.get('corporate_rent'),
-            furnished_rent=item.get('furnished_rent'),
-        )
-        session_single.add(single_record)
-        session_single.commit()
-    finally:
-        session_single.close()
+community = session_mutiple.query(CommunityData).filter_by(name=item['community_name']).first()
 
-    # ----- MULTI-TABLE INSERT -----
-    session_multiple = self.Session_multiple()
-    try:
-        # COMMUNITY
-        community = session_multiple.query(CommunityData).filter_by(community_name=item['community_name']).first()
-        if not community:
-            community = CommunityData(
-                community_name=item.get('community_name'),
-                community_address=item.get('community_address'),
-                community_rent=item.get('community_rent'),
-                community_rooms=item.get('community_rooms'),
-                community_description=item.get('community_description'),
-                community_amenities=', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else ''
-            )
-            session_multiple.add(community)
-            session_multiple.commit()
+if community:
+    community.community_address = item.get('community_address')
+    community.community_rent = item.get('community_rent')
+    community.community_rooms = item.get('community_rooms')
+    community.community_description = item.get('community_description')
+    community.community_amenities = ', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else ''
+else:
+    community = CommunityData(
+        community_name=item.get('community_name'),
+        community_address=item.get('community_address'),
+        community_rent=item.get('community_rent'),
+        community_rooms=item.get('community_rooms'),
+        community_description=item.get('community_description'),
+        community_amenities=', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else ''
+    )
+    session_mutiple.add(community)
 
-        # APARTMENT
-        apartment = session_multiple.query(ApartmentData).filter_by(
-            apartment_no=item['apartment_no']
-        ).first()
-
-        if not apartment:
-            apartment = ApartmentData(
-                apartment_no=item.get('apartment_no'),
-                community=item.get('community_name'),
-                no_of_bedrooms=item.get('no_of_bedrooms'),
-                no_of_bathrooms=item.get('no_of_bathrooms'),
-                area=item.get('area'),
-                floor_no=item.get('floor_no'),
-                availability=item.get('availability'),
-                deposit=item.get('deposit'),
-                Max_rent=item.get('Max_rent'),
-                Min_rent=item.get('Min_rent'),
-                amenities=', '.join(item.get('amenities', []))
-            )
-            session_multiple.add(apartment)
-            session_multiple.commit()
-
-        # RENT MATRIX
-        for i in item.get('raw_rent_matrix', []):
-            rent = session_multiple.query(RentMatrixData).filter_by(
-                apartement=item.get('apartment_no'),
-                move_in_date=i.get('MoveInDate'),
-                lease_term=i.get('LeaseTerm')
-            ).first()
-
-            if not rent:
-                rent_matrix_record = RentMatrixData(
-                    apartement=item.get('apartment_no'),
-                    move_in_date=i.get('MoveInDate'),
-                    lease_term=i.get('LeaseTerm'),
-                    rent=i.get('Rent'),
-                    corporate_rent=i.get('CorporateRent'),
-                    furnished_rent=i.get('FurnishedRent')
-                )
-                session_multiple.add(rent_matrix_record)
-
-        session_multiple.commit()
-
-    except Exception as e:
-        session_multiple.rollback()
-        raise DropItem(f"Database error: {e}")
-
-    finally:
-        session_multiple.close()
-
-    return item
+session_mutiple.commit()
