@@ -1,120 +1,17 @@
-from sqlalchemy import Column, ForeignKey, PrimaryKeyConstraint
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import (Integer, String, Float, Boolean, Text, DateTime, Date)
-from datetime import datetime
-from sqlalchemy.orm import relationship
-from scrapy.utils.project import get_project_settings
-
-Base_single_table = declarative_base()
-Base_multiple_table = declarative_base()
-# Base_post_scraping_table = declarative_base()
-
-
-class Udr(Base_single_table):
-    __tablename__="udr_data"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    community_name = Column(String(100), nullable=False)
-    community_address = Column(String(200), nullable=False)
-    community_rent = Column(Float, nullable=True)
-    community_rooms = Column(Integer, nullable=True)
-    community_description = Column(Text, nullable=True)
-    apartment_no = Column(String(50), nullable=True)
-    no_of_bedrooms = Column(Integer, nullable=True)
-    no_of_bathrooms = Column(Integer, nullable=True)
-    area = Column(Integer, nullable=True)
-    floor_no = Column(Integer, nullable=True)
-    availability = Column(Boolean, nullable=True)
-    deposit = Column(Float, nullable=True)
-    Max_rent = Column(Float, nullable=True)
-    Min_rent = Column(Float, nullable=True)
-    amenities = Column(Text, nullable=True)
-    community_amenities = Column(Text, nullable=True)
-
-    move_in_date = Column(Date, nullable=True)
-    lease_term = Column(Integer, nullable=True)
-    rent = Column(Integer, nullable=True)
-    corporate_rent = Column(Integer, nullable=True)
-    furnished_rent = Column(Integer, nullable=True)
-
-    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
-    created_datetime = Column(DateTime(), default=datetime.now)
-
-
-# Multiple Tables implementation
-# One-to-Many Relationship
-
-# Now as we have implemented insert ignore on community data we use it as a foreign key in apartment data
-class CommunityData(Base_multiple_table):
-    __tablename__ = "community_data"
-
-    community_sr = Column(Integer,primary_key=True, autoincrement=True)
-    community_name = Column(String(100), unique=True, nullable=False)
-    community_address = Column(String(200), nullable=False)
-    community_rent = Column(Float, nullable=True)
-    community_rooms = Column(Integer, nullable=True)
-    community_description = Column(Text, nullable=True)
-    child = relationship("ApartmentData", back_populates="parent")
-    # apartment_data = relationship("ApartmentData")  # To create foreign in Apartement data
-    community_amenities = Column(Text, nullable=True)
-    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
-    created_datetime = Column(DateTime(), default=datetime.now)
-
-
-    # __tabl_args__=(
-    #     PrimaryKeyConstraint('id', 'community_name')
-    # )
-
-
-
-class ApartmentData(Base_multiple_table):
-    __tablename__ = "apartment_data"
-
-    apartment_sr = Column(Integer,primary_key=True, autoincrement=True)
-    community = Column(String(100), ForeignKey('community_data.community_name'))
-    parent = relationship("CommunityData", back_populates="child")
-    apartment_no = Column(String(50), nullable=True) # Fix--
-    no_of_bedrooms = Column(Integer, nullable=True)
-    no_of_bathrooms = Column(Integer, nullable=True)
-    area = Column(Integer, nullable=True)
-    floor_no = Column(Integer, nullable=True)
-    availability = Column(Boolean, nullable=True)
-    deposit = Column(Float, nullable=True)
-    Max_rent = Column(Float, nullable=True)
-    Min_rent = Column(Float, nullable=True)
-    amenities = Column(Text, nullable=True)
-
-    # rent_matrix_data = relationship("RentMatrixData")
-    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
-    created_datetime = Column(DateTime(), default=datetime.now)
-
-
-
-class RentMatrixData(Base_multiple_table):
-    __tablename__ = "rent_matrix"
-
-    id = Column(Integer, primary_key=True , autoincrement=True)
-    # apartement_sr = Column(Integer, ForeignKey('apartment_data.apartment_sr'))
-    move_in_date = Column(Date, nullable=True)
-    lease_term = Column(Integer, nullable=True)
-    rent = Column(Integer, nullable=True)
-    corporate_rent = Column(Integer, nullable=True)
-    furnished_rent = Column(Integer, nullable=True)
-    updated_datetime = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
-    created_datetime = Column(DateTime(), default=datetime.now)
-
-
-
-
-
+# Define your item pipelines here
+#
+# Don't forget to add your pipeline to the ITEM_PIPELINES setting
+# See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 import csv
 import json
 from xmlrpc.client import Boolean
 
 import pandas as pd
+from scrapy.exceptions import DropItem
 from sqlalchemy import create_engine, insert
-from urd_scraper.models import Udr, Base_multiple_table, Base_single_table, ApartmentData, CommunityData, RentMatrixData, Base_post_scraping_table
+from urd_scraper.models import Udr, Base_multiple_table, Base_single_table, ApartmentData, CommunityData, RentMatrixData, Base_post_scraping_table, PostScraping
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.sql import func
 from itemadapter import ItemAdapter
 
 # useful for handling different item types with a single interface
@@ -176,14 +73,10 @@ class UrdScraperPipelineParquet:
             self.save_to_parquet()
 
 
-class UrdScraperDatabase:
 
+
+class UrdMultipleTablePipeline:
     def open_spider(self, spider):
-        # single column implementation
-        engine_single = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module5_single')
-        Base_single_table.metadata.create_all(engine_single)
-        self.Session_single = sessionmaker(bind=engine_single)
-
         # multiple column implementation
         engine_multiple = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module_5_multiple')
         Base_multiple_table.metadata.create_all(engine_multiple)
@@ -191,7 +84,115 @@ class UrdScraperDatabase:
 
 
     def process_item(self, item, spider):
-        session_single = self.Session_single()
+
+        session_mutiple = self.Session_multiple()
+        try:
+            community = session_mutiple.query(CommunityData).filter_by(community_name=item['community_name']).first()
+            if community:
+                community.community_address = item.get('community_address')
+                community.community_rent = item.get('community_rent')
+                community.community_rooms = item.get('community_rooms')
+                community.community_description = item.get('community_description')
+                community.community_amenities = ', '.join(item.get('community_amenities', [])) if item.get(
+                    'community_amenities') else ''
+                community.updated_datetime = func.now()    ######
+
+            else:
+                community = CommunityData(
+                    community_name=item.get('community_name'),
+                    community_address=item.get('community_address'),
+                    community_rent=item.get('community_rent'),
+                    community_rooms=item.get('community_rooms'),
+                    community_description=item.get('community_description'),
+                    community_amenities=', '.join(item.get('community_amenities', [])) if item.get(
+                        'community_amenities') else ''
+                )
+                session_mutiple.add(community)
+                session_mutiple.commit()
+
+
+            apartment = session_mutiple.query(ApartmentData).filter_by(apartment_no=item['apartment_no']).first()
+            if apartment:
+                apartment.community = community.community_name
+                apartment.no_of_bedrooms = item.get('no_of_bedrooms')
+                apartment.no_of_bathrooms = item.get('no_of_bathrooms')
+                apartment.area = item.get('area')
+                apartment.floor_no = item.get('floor_no')
+                apartment.availability = item.get('availability')
+                apartment.deposit = item.get('deposit')
+                apartment.Max_rent = item.get('Max_rent')
+                apartment.Min_rent = item.get('Min_rent')
+                apartment.amenities = ', '.join(item.get('amenities', []))
+                apartment.updated_datetime = func.now() #######
+            # insert(ApartmentData).values
+            else:
+                apartment = ApartmentData(
+                    apartment_no=item.get('apartment_no'),
+                    community=community.community_name,
+                    no_of_bedrooms=item.get('no_of_bedrooms'),
+                    no_of_bathrooms=item.get('no_of_bathrooms'),
+                    area=item.get('area'),
+                    floor_no=item.get('floor_no'),
+                    availability=item.get('availability'),
+                    deposit=item.get('deposit'),
+                    Max_rent=item.get('Max_rent'),
+                    Min_rent=item.get('Min_rent'),
+                    amenities=', '.join(item.get('amenities', []))
+                )
+                session_mutiple.add(apartment)
+                session_mutiple.commit()
+
+
+            for i in item['raw_rent_matrix']:
+                rent = session_mutiple.query(RentMatrixData).filter_by(
+                    apartement=apartment.apartment_no,
+                    move_in_date=i.get('MoveInDate'),
+                    lease_term=i.get('LeaseTerm')
+                ).first()
+                if rent:
+                    rent.rent = i.get('Rent')
+                    rent.corporate_rent = i.get('CorporateRent')
+                    rent.furnished_rent = i.get('FurnishedRent')
+                    rent.updated_datetime = func.now() #########
+                else:
+                    rent_matrix_record = RentMatrixData(
+                        apartement=apartment.apartment_no,
+                        move_in_date=i.get('MoveInDate'),
+                        lease_term=i.get('LeaseTerm'),
+                        rent=i.get('Rent'),
+                        corporate_rent=i.get('CorporateRent'),
+                        furnished_rent=i.get('FurnishedRent')
+                    )
+                    session_mutiple.add(rent_matrix_record)
+                session_mutiple.commit()
+
+            session_mutiple.commit()
+            session_mutiple.close()
+            return item
+
+        except Exception as e:
+            session_mutiple.rollback()
+            raise DropItem(f"Database error: {e}")
+
+        finally:
+            session_mutiple.close()
+
+
+    def close_spider(self, spider):
+        self.Session_multiple().close()
+
+
+
+
+class UrdSingleTablePipeline:
+    def open_spider(self, spider):
+        # single column implementation
+        engine_single = create_engine('mysql+mysqlconnector://root:root@localhost:3306/module5_single')
+        Base_single_table.metadata.create_all(engine_single)
+        self.Session_single = sessionmaker(bind=engine_single)
+
+    def process_item(self, item, spider):
+
         single_record = Udr(
             community_name=item.get('community_name'),
             community_address=item.get('community_address'),
@@ -216,63 +217,67 @@ class UrdScraperDatabase:
             corporate_rent = item.get('corporate_rent'),
             furnished_rent = item.get('furnished_rent'),
         )
-        # # ---
-        # stmt = insert(Udr).prefix_with("IGNORE").values(single_record)
-        # session_single.execute(stmt)
 
-        session_single.add(single_record)
-        session_single.commit()
-        session_single.close()
-        # return item
-
-        session_mutiple = self.Session_multiple()
-        multiple_record_community = insert(CommunityData).values(
-            community_name=item.get('community_name'),
-            community_address=item.get('community_address'),
-            community_rent=item.get('community_rent'),
-            community_rooms=item.get('community_rooms'),
-            community_description=item.get('community_description'),
-            community_amenities = ', '.join(item.get('community_amenities', [])) if item.get('community_amenities') else ''
-        )
-        # insert(ApartmentData).values
-        multiple_record_apartment = ApartmentData(
-            apartment_no =item.get('apartment_no'),
-            no_of_bedrooms=item.get('no_of_bedrooms'),
-            no_of_bathrooms=item.get('no_of_bathrooms'),
-            area=item.get('area'),
-            floor_no=item.get('floor_no'),
-            availability=item.get('availability'),
-            deposit=item.get('deposit'),
-            Max_rent=item.get('Max_rent'),
-            Min_rent=item.get('Min_rent'),
-            amenities=', '.join(item.get('amenities', [])),
-
-        )
-
-        # Implemented Insert Ignore for community data
-        stmt = multiple_record_community.prefix_with('IGNORE')
-        session_mutiple.execute(stmt)
-
-        # Implemented Insert Ignore for apartment data
-        session_mutiple.add(multiple_record_apartment)
-        # stmt_a = multiple_record_apartment.prefix_with('IGNORE')
-        # session_mutiple.execute(stmt_a)
-
-        for i in item['raw_rent_matrix']:
-            rent_matrix_record = RentMatrixData(
-            move_in_date = i.get('MoveInDate'),
-            lease_term = i.get('LeaseTerm'),
-            rent = i.get('Rent'),
-            corporate_rent = i.get('CorporateRent'),
-            furnished_rent = i.get('FurnishedRent'))
-            session_mutiple.add(rent_matrix_record)
-        session_mutiple.commit()
-
-
-
-        # session_mutiple.add(multiple_record_community)
-        # session_mutiple.add(multiple_record_apartment)
-        # session_mutiple.add(rent_matrix_record)
-        session_mutiple.commit()
-        session_mutiple.close()
+        self.Session_single().add(single_record)
+        self.Session_single().commit()
+        self.Session_single().close()
         return item
+
+    def close_spider(self, spider):
+        self.Session_single().close()
+
+
+
+
+class PostScrapeMySQLPipeline:
+    def __init__(self):
+        self.file_path = "data.json"  # adjust as needed
+
+    def open_spider(self, spider):
+        # Set up the DB connection
+        self.engine_post_scraping = create_engine("mysql+mysqlconnector://root:root@localhost:3306/module_5_post_scraping_db")
+        Base_post_scraping_table.metadata.create_all(self.engine_post_scraping)
+        self.Session_post_scraing = sessionmaker(bind=self.engine_post_scraping)
+
+
+    def close_spider(self, spider):
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            spider.logger.error(f"Failed to read JSON file: {e}")
+            return
+
+        session = self.Session_post_scraing()
+        for row in data:
+            print(f"row----> : {row}")
+            try:
+                post_scraping = PostScraping(
+                    community_name=row.get('community_name'),
+                    community_address=row.get('community_address'),
+                    community_rent=row.get('community_rent'),
+                    community_rooms=row.get('community_rooms'),
+                    community_description=row.get('community_description'),
+                    apartment_no=row.get('apartment_no'),
+                    no_of_bedrooms=row.get('no_of_bedrooms'),
+                    no_of_bathrooms=row.get('no_of_bathrooms'),
+                    area=row.get('area'),
+                    floor_no=row.get('floor_no'),
+                    availability=row.get('availability'),
+                    deposit=row.get('deposit'),
+                    Max_rent=row.get('Max_rent'),
+                    Min_rent=row.get('Min_rent'),
+                    amenities=', '.join(row.get('amenities', [])),
+                    community_amenities=', '.join(row.get('community_amenities', [])) if row.get(
+                        'community_amenities') else '',
+                    move_in_date=row.get('move_in_date'),
+                    lease_term=row.get('lease_term'),
+                    rent=row.get('rent'),
+                    corporate_rent=row.get('corporate_rent'),
+                    furnished_rent=row.get('furnished_rent'),
+                )
+                session.add(post_scraping)
+            except Exception as e:
+                spider.logger.error(f"Failed to insert item: {row}\nError: {e}")
+        session.commit()
+        session.close()
